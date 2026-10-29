@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Union
+import logging
 import torch
 from collections.abc import Iterable
 
 if TYPE_CHECKING:
-    from comfy.model_patcher import ModelPatcher
     from comfy.sd import CLIP
 
 import comfy.hooks
@@ -33,7 +33,7 @@ class PairConditioningSetProperties:
                 "timesteps": ("TIMESTEPS_RANGE",),
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
     RETURN_NAMES = ("positive", "negative")
@@ -47,7 +47,7 @@ class PairConditioningSetProperties:
                                                                     strength=strength, set_cond_area=set_cond_area,
                                                                     mask=mask, hooks=hooks, timesteps_range=timesteps)
         return (final_positive, final_negative)
-    
+
 class PairConditioningSetPropertiesAndCombine:
     NodeId = 'PairConditioningSetPropertiesAndCombine'
     NodeName = 'Cond Pair Set Props Combine'
@@ -68,7 +68,7 @@ class PairConditioningSetPropertiesAndCombine:
                 "timesteps": ("TIMESTEPS_RANGE",),
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
     RETURN_NAMES = ("positive", "negative")
@@ -159,7 +159,7 @@ class PairConditioningCombine:
                 "negative_B": ("CONDITIONING",),
             },
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
     RETURN_NAMES = ("positive", "negative")
@@ -186,7 +186,7 @@ class PairConditioningSetDefaultAndCombine:
                 "hooks": ("HOOKS",),
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
     RETURN_NAMES = ("positive", "negative")
@@ -198,7 +198,7 @@ class PairConditioningSetDefaultAndCombine:
         final_positive, final_negative = comfy.hooks.set_default_conds_and_combine(conds=[positive, negative], new_conds=[positive_DEFAULT, negative_DEFAULT],
                                                                                    hooks=hooks)
         return (final_positive, final_negative)
-    
+
 class ConditioningSetDefaultAndCombine:
     NodeId = 'ConditioningSetDefaultCombine'
     NodeName = 'Cond Set Default Combine'
@@ -224,7 +224,7 @@ class ConditioningSetDefaultAndCombine:
         (final_conditioning,) = comfy.hooks.set_default_conds_and_combine(conds=[cond], new_conds=[cond_DEFAULT],
                                                                         hooks=hooks)
         return (final_conditioning,)
-    
+
 class SetClipHooks:
     NodeId = 'SetClipHooks'
     NodeName = 'Set CLIP Hooks'
@@ -233,32 +233,33 @@ class SetClipHooks:
         return {
             "required": {
                 "clip": ("CLIP",),
-                "apply_to_conds": ("BOOLEAN", {"default": True}),
-                "schedule_clip": ("BOOLEAN", {"default": False})
+                "apply_to_conds": ("BOOLEAN", {"default": True, "advanced": True}),
+                "schedule_clip": ("BOOLEAN", {"default": False, "advanced": True})
             },
             "optional": {
                 "hooks": ("HOOKS",)
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("CLIP",)
     CATEGORY = "advanced/hooks/clip"
     FUNCTION = "apply_hooks"
 
-    def apply_hooks(self, clip: 'CLIP', schedule_clip: bool, apply_to_conds: bool, hooks: comfy.hooks.HookGroup=None):
+    def apply_hooks(self, clip: CLIP, schedule_clip: bool, apply_to_conds: bool, hooks: comfy.hooks.HookGroup=None):
         if hooks is not None:
-            clip = clip.clone()
+            clip = clip.clone(disable_dynamic=True)
             if apply_to_conds:
                 clip.apply_hooks_to_conds = hooks
             clip.patcher.forced_hooks = hooks.clone()
             clip.use_clip_schedule = schedule_clip
             if not clip.use_clip_schedule:
                 clip.patcher.forced_hooks.set_keyframes_on_hooks(None)
-            clip.patcher.register_all_hook_patches(hooks.get_dict_repr(), comfy.hooks.EnumWeightTarget.Clip)
+            clip.patcher.register_all_hook_patches(hooks, comfy.hooks.create_target_dict(comfy.hooks.EnumWeightTarget.Clip))
         return (clip,)
 
 class ConditioningTimestepsRange:
+    SEARCH_ALIASES = ["prompt scheduling", "timestep segments", "conditioning phases"]
     NodeId = 'ConditioningTimestepsRange'
     NodeName = 'Timesteps Range'
     @classmethod
@@ -269,7 +270,7 @@ class ConditioningTimestepsRange:
                 "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001})
             },
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("TIMESTEPS_RANGE", "TIMESTEPS_RANGE", "TIMESTEPS_RANGE")
     RETURN_NAMES = ("TIMESTEPS_RANGE", "BEFORE_RANGE", "AFTER_RANGE")
@@ -290,7 +291,7 @@ class CreateHookLora:
     NodeName = 'Create Hook LoRA'
     def __init__(self):
         self.loaded_lora = None
-    
+
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -303,7 +304,7 @@ class CreateHookLora:
                 "prev_hooks": ("HOOKS",)
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOKS",)
     CATEGORY = "advanced/hooks/create"
@@ -316,7 +317,7 @@ class CreateHookLora:
 
         if strength_model == 0 and strength_clip == 0:
             return (prev_hooks,)
-        
+
         lora_path = folder_paths.get_full_path("loras", lora_name)
         lora = None
         if self.loaded_lora is not None:
@@ -326,7 +327,7 @@ class CreateHookLora:
                 temp = self.loaded_lora
                 self.loaded_lora = None
                 del temp
-        
+
         if lora is None:
             lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
             self.loaded_lora = (lora_path, lora)
@@ -348,7 +349,7 @@ class CreateHookLoraModelOnly(CreateHookLora):
                 "prev_hooks": ("HOOKS",)
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOKS",)
     CATEGORY = "advanced/hooks/create"
@@ -378,7 +379,7 @@ class CreateHookModelAsLora:
                 "prev_hooks": ("HOOKS",)
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOKS",)
     CATEGORY = "advanced/hooks/create"
@@ -401,7 +402,7 @@ class CreateHookModelAsLora:
                 temp = self.loaded_weights
                 self.loaded_weights = None
                 del temp
-        
+
         if weights_model is None:
             out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
             weights_model = comfy.hooks.get_patch_weights_from_model(out[0])
@@ -426,7 +427,7 @@ class CreateHookModelAsLoraModelOnly(CreateHookModelAsLora):
                 "prev_hooks": ("HOOKS",)
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOKS",)
     CATEGORY = "advanced/hooks/create"
@@ -455,7 +456,7 @@ class SetHookKeyframes:
                 "hook_kf": ("HOOK_KEYFRAMES",),
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOKS",)
     CATEGORY = "advanced/hooks/scheduling"
@@ -468,6 +469,7 @@ class SetHookKeyframes:
         return (hooks,)
 
 class CreateHookKeyframe:
+    SEARCH_ALIASES = ["hook scheduling", "strength animation", "timed hook"]
     NodeId = 'CreateHookKeyframe'
     NodeName = 'Create Hook Keyframe'
     @classmethod
@@ -481,7 +483,7 @@ class CreateHookKeyframe:
                 "prev_hook_kf": ("HOOK_KEYFRAMES",),
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOK_KEYFRAMES",)
     RETURN_NAMES = ("HOOK_KF",)
@@ -495,8 +497,57 @@ class CreateHookKeyframe:
         keyframe = comfy.hooks.HookKeyframe(strength=strength_mult, start_percent=start_percent)
         prev_hook_kf.add(keyframe)
         return (prev_hook_kf,)
-    
+
+class CreateHookKeyframesInterpolated:
+    SEARCH_ALIASES = ["ease hook strength", "smooth hook transition", "interpolate keyframes"]
+    NodeId = 'CreateHookKeyframesInterpolated'
+    NodeName = 'Create Hook Keyframes Interp.'
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "strength_start": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "strength_end": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "interpolation": (comfy.hooks.InterpolationMethod._LIST, ),
+                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "keyframes_count": ("INT", {"default": 5, "min": 2, "max": 100, "step": 1}),
+                "print_keyframes": ("BOOLEAN", {"default": False, "advanced": True}),
+            },
+            "optional": {
+                "prev_hook_kf": ("HOOK_KEYFRAMES",),
+            },
+        }
+
+    EXPERIMENTAL = True
+    RETURN_TYPES = ("HOOK_KEYFRAMES",)
+    RETURN_NAMES = ("HOOK_KF",)
+    CATEGORY = "advanced/hooks/scheduling"
+    FUNCTION = "create_hook_keyframes"
+
+    def create_hook_keyframes(self, strength_start: float, strength_end: float, interpolation: str,
+                              start_percent: float, end_percent: float, keyframes_count: int,
+                              print_keyframes=False, prev_hook_kf: comfy.hooks.HookKeyframeGroup=None):
+        if prev_hook_kf is None:
+            prev_hook_kf = comfy.hooks.HookKeyframeGroup()
+        prev_hook_kf = prev_hook_kf.clone()
+        percents = comfy.hooks.InterpolationMethod.get_weights(num_from=start_percent, num_to=end_percent, length=keyframes_count,
+                                                               method=comfy.hooks.InterpolationMethod.LINEAR)
+        strengths = comfy.hooks.InterpolationMethod.get_weights(num_from=strength_start, num_to=strength_end, length=keyframes_count, method=interpolation)
+
+        is_first = True
+        for percent, strength in zip(percents, strengths):
+            guarantee_steps = 0
+            if is_first:
+                guarantee_steps = 1
+                is_first = False
+            prev_hook_kf.add(comfy.hooks.HookKeyframe(strength=strength, start_percent=percent, guarantee_steps=guarantee_steps))
+            if print_keyframes:
+                logging.info(f"Hook Keyframe - start_percent:{percent} = {strength}")
+        return (prev_hook_kf,)
+
 class CreateHookKeyframesFromFloats:
+    SEARCH_ALIASES = ["batch keyframes", "strength list to keyframes"]
     NodeId = 'CreateHookKeyframesFromFloats'
     NodeName = 'Create Hook Keyframes From Floats'
     @classmethod
@@ -506,13 +557,13 @@ class CreateHookKeyframesFromFloats:
                 "floats_strength": ("FLOATS", {"default": -1, "min": -1, "step": 0.001, "forceInput": True}),
                 "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
                 "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
-                "print_keyframes": ("BOOLEAN", {"default": False}),
+                "print_keyframes": ("BOOLEAN", {"default": False, "advanced": True}),
             },
             "optional": {
                 "prev_hook_kf": ("HOOK_KEYFRAMES",),
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOK_KEYFRAMES",)
     RETURN_NAMES = ("HOOK_KF",)
@@ -533,7 +584,7 @@ class CreateHookKeyframesFromFloats:
             raise Exception(f"floats_strength must be either an iterable input or a float, but was{type(floats_strength).__repr__}.")
         percents = comfy.hooks.InterpolationMethod.get_weights(num_from=start_percent, num_to=end_percent, length=len(floats_strength),
                                                                method=comfy.hooks.InterpolationMethod.LINEAR)
-        
+
         is_first = True
         for percent, strength in zip(percents, floats_strength):
             guarantee_steps = 0
@@ -542,7 +593,7 @@ class CreateHookKeyframesFromFloats:
                 is_first = False
             prev_hook_kf.add(comfy.hooks.HookKeyframe(strength=strength, start_percent=percent, guarantee_steps=guarantee_steps))
             if print_keyframes:
-                print(f"Hook Keyframe - start_percent:{percent} = {strength}")
+                logging.info(f"Hook Keyframe - start_percent:{percent} = {strength}")
         return (prev_hook_kf,)
 #------------------------------------------
 ###########################################
@@ -557,7 +608,7 @@ class SetModelHooksOnCond:
                 "hooks": ("HOOKS",),
             },
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("CONDITIONING",)
     CATEGORY = "advanced/hooks/manual"
@@ -571,6 +622,7 @@ class SetModelHooksOnCond:
 # Combine Hooks
 #------------------------------------------
 class CombineHooks:
+    SEARCH_ALIASES = ["merge hooks"]
     NodeId = 'CombineHooks2'
     NodeName = 'Combine Hooks [2]'
     @classmethod
@@ -583,7 +635,7 @@ class CombineHooks:
                 "hooks_B": ("HOOKS",),
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOKS",)
     CATEGORY = "advanced/hooks/combine"
@@ -610,7 +662,7 @@ class CombineHooksFour:
                 "hooks_D": ("HOOKS",),
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOKS",)
     CATEGORY = "advanced/hooks/combine"
@@ -643,7 +695,7 @@ class CombineHooksEight:
                 "hooks_H": ("HOOKS",),
             }
         }
-    
+
     EXPERIMENTAL = True
     RETURN_TYPES = ("HOOKS",)
     CATEGORY = "advanced/hooks/combine"
@@ -672,6 +724,7 @@ node_list = [
     # Scheduling
     SetHookKeyframes,
     CreateHookKeyframe,
+    CreateHookKeyframesInterpolated,
     CreateHookKeyframesFromFloats,
     # Combine
     CombineHooks,
